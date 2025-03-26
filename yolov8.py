@@ -1,6 +1,9 @@
+import threading
 import time
 
 import math
+
+import numpy as np
 
 from inference import letterbox, post_process
 from rknn_executor import RKNN_model_container
@@ -36,7 +39,7 @@ def center_bbox(left, top, right, bottom, img_size=(640, 480)):
 
 def angle_dff(height_dff):
     short_side = height_dff * 38 / 158
-    long_side = 170
+    long_side = 200
     # 计算正切值
     tan_value = short_side / long_side
     # 计算弧度值
@@ -49,13 +52,42 @@ def angle_dff(height_dff):
     return angle
 
 
+def draw_one(image, box, score, cl, dw, dh, r, CLASSES):
+    img_h, img_w = image.shape[:2]  # 获取图像尺寸
+
+    # 获取原始目标框
+    left, top, right, bottom = box
+
+    # 进行缩放变换
+    left = int((left - dw) / r[0])
+    top = int((top - dh) / r[0])
+    right = int((right - dw) / r[0])
+    bottom = int((bottom - dh) / r[0])
+
+    # 确保坐标不会超出边界
+    left = max(0, min(img_w - 1, left))
+    top = max(0, min(img_h - 1, top))
+    right = max(0, min(img_w - 1, right))
+    bottom = max(0, min(img_h - 1, bottom))
+
+    # 画原始目标框
+    cv2.rectangle(image, (left, top), (right, bottom), (255, 0, 0), 1)
+
+    # 添加类别和置信度信息
+    label = f'{CLASSES[cl]} {score:.2f}'
+    # print(label)
+    cv2.putText(image, label, (left, max(10, top - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 1)
+
+    return left, top, right, bottom
+
+
 def draw(image, boxes, scores, classes, dw, dh, r, CLASSES):
     # anchor = []
     img_h, img_w = image.shape[:2]  # 获取图像尺寸
 
     for box, score, cl in zip(boxes, scores, classes):
-        # if score < 0.5:  # 过滤低置信度目标
-        #     continue
+        if score < 0.5:  # 过滤低置信度目标
+            continue
 
         # 获取原始目标框
         left, top, right, bottom = box
@@ -78,7 +110,7 @@ def draw(image, boxes, scores, classes, dw, dh, r, CLASSES):
         # print((left + right) // 2, (top + bottom) // 2)
         # 添加类别和置信度信息
         label = f'{CLASSES[cl]} {score:.2f}'
-        print(label)
+        # print(label)
         cv2.putText(image, label, (left, max(10, top - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 1)
 
         # 计算居中的目标框位置
@@ -115,11 +147,11 @@ def draw(image, boxes, scores, classes, dw, dh, r, CLASSES):
 
 
 # 配置参数
-SERIAL_PORT = "/dev/ttyUSB0"
-BAUDRATE = 921600
+SERIAL_PORT = "/dev/ttyS0"
+BAUDRATE = 115200
 
 VIDEO_SOURCE = "/dev/video11"
-SERVER_IP = "192.168.254.110"
+SERVER_IP = "192.168.1.36"
 SERVER_PORT = 8888
 
 MODEL_PATH = "models/test/n_small1_rknn.rknn"
@@ -128,7 +160,7 @@ DEVICE_ID = None
 
 IMG_SIZE = (640, 480)
 CLASSES = ("Drone", "")
-OBJ_THRESH = 0.25
+OBJ_THRESH = 0.1
 NMS_THRESH = 0.1
 
 
@@ -136,8 +168,8 @@ def init_serial(port=SERIAL_PORT, baudrate=BAUDRATE, bytesize=8, stopbits=1, par
     """初始化串口通信"""
     ser = SerialCommunicator(port, baudrate, bytesize, stopbits, parity)
     ser.open_serial()
-    ser.send_data("0")
-    ser.send_data("*90")  # 发送初始角度
+    # ser.send_data("0")
+    ser.send_data("#000P1500T0025!")  # 发送初始角度
     return ser
 
 
@@ -170,6 +202,10 @@ def send_frame(client_socket, frame):
     client_socket.sendall(size + data)
 
 
+def send_data_thread(ser, data):
+    ser.send_data(data)
+
+
 def main():
     """主函数"""
     # 初始化组件
@@ -178,18 +214,17 @@ def main():
     cap = init_video()
     model = init_model()
 
-    old_angle = 90
     frame_count = 0
     lost_frame = 0
     start_time = time.time()
 
-    last_send_time = 0  # 记录上次发送的时间
-    SEND_INTERVAL = 0.2  # 200ms 的最小间隔
+    pwm_out = 1500
 
     try:
         while cap.isOpened():
             ret, frame = cap.read()
             if not ret:
+                print("no frame")
                 continue
 
             # 预处理 & 推理
@@ -198,49 +233,52 @@ def main():
             outputs = model.run(inputs=[img])
 
             boxes, classes, scores = post_process(outputs, img_sz=IMG_SIZE, nms=NMS_THRESH, obj_conf=OBJ_THRESH)
-
             if boxes is not None:
-                new_left, new_top, new_right, new_bottom, left, top, right, bottom = draw(
-                    frame, boxes, scores, classes, dw, dh, ratio, CLASSES=CLASSES
+                # 找到置信度最高的检测框的索引
+                max_conf_index = np.argmax(scores)  # 使用 NumPy 的 argmax 方法
+
+                # 提取置信度最高的检测框的坐标和类别
+                highest_conf_box = boxes[max_conf_index]
+                highest_conf_class = classes[max_conf_index]
+                highest_conf_score = scores[max_conf_index]
+
+                # 绘制置信度最高的检测框
+                left, top, right, bottom = draw_one(
+                    frame, highest_conf_box, highest_conf_score, highest_conf_class, dw, dh, ratio, CLASSES=CLASSES
                 )
 
-                # if frame_count % 10 == 0:
-                #     height_diff = new_bottom - bottom
-                #     if height_diff < 50:
-                #         continue
-                #     deflection_angle = angle_dff(height_diff)
-                #     angle = deflection_angle + 90
-                #
-                #     # 仅当角度变化大于等于 1° 时才发送
-                #     if abs(angle - old_angle) >= 1:
-                #         ser.send_data(f"*{angle}")
-                #         print(f"Sent Angle: *{angle} Δ={deflection_angle}")
-                #         old_angle = angle
+                # if frame_count % 1 == 0:
+                width_center = (right + left) / 2
+                height_center = (bottom + top) / 2
+
+                img_height_center = frame.shape[0] / 2
+                img_width_center = frame.shape[1] / 2
+
+                height_diff = img_height_center - height_center
+
+                # 根据检测框高度差计算目标偏移角度（注意：这里函数 angle_dff 需要根据实际情况确定转换规则）
+                deflection_angle = - round(angle_dff(height_diff), 3)
+
+                # 计算出目标角度（假设图像中心对应 90°）
+                angle = deflection_angle + 90
+
+                # 计算此次应调整的 pwm 增量（比例系数可根据实际情况调节）
+                pwm_adjustment = deflection_angle * 2
+                # 采用低通滤波平滑 pwm 输出，避免调整幅度过大
+                new_pwm = int(pwm_out + pwm_adjustment)
+                # 限制 pwm 范围
+                new_pwm = max(min(new_pwm, 2500), 500)
+
+                # 当角度变化较大且 pwm 有变化时再发送数据（这里设定角度变化至少 1°）
+                if abs(deflection_angle) > 1:
+                    pwm_data = f"#000P{new_pwm:04d}T0025!"
+                    print(f"Sent: {pwm_data} angle:{angle} Δ={deflection_angle}")
+                    pwm_out = new_pwm
+                    # 开启新线程发送数据，防止阻塞主线程
+                    threading.Thread(target=send_data_thread, args=(ser, pwm_data)).start()
             else:
                 lost_frame += 1
-                print("Lost frame: ", frame_count)
-
-                # if frame_count % 10 == 0:
-                #     height_diff = new_bottom - bottom
-                #     if height_diff < 50:
-                #         continue  # 变化过小，忽略
-                #
-                #     deflection_angle = angle_dff(height_diff)
-                #     angle = deflection_angle + 90
-                #     angle_diff = abs(angle - old_angle)
-                #
-                #     # 获取当前时间
-                #     current_time = time.time()
-                #
-                #     # 1. 角度变化大于等于 5° 时，立即发送
-                #     # 2. 角度变化 1°-5° 且时间间隔足够时，发送
-                #     if angle_diff >= 5 or (angle_diff >= 1 and current_time - last_send_time >= SEND_INTERVAL):
-                #         ser.send_data(f"*{angle}")
-                #         print(f"Sent Angle: *{angle}, Δ: {angle_diff}°")
-                #         old_angle = angle
-                #         last_send_time = current_time  # 更新上次发送时间
-                #     else:
-                #         continue
+                # print("Lost frame: ", lost_frame)
 
             # 计算 FPS
             frame_count += 1
@@ -249,8 +287,6 @@ def main():
 
             # 显示 FPS
             cv2.putText(frame, f"FPS: {fps:.2f}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
-            cv2.circle(frame, (320, 240), 1, (0, 0, 255), 4)
-
             # 发送数据到服务器
             send_frame(client_socket, frame)
 

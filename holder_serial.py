@@ -63,8 +63,8 @@ class SerialCommunicator:
 
 
 if __name__ == "__main__":
-    port = '/dev/ttyUSB0'
-    baudrate = 921600
+    port = '/dev/ttyS0'
+    baudrate = 115200
     bytesize = 8
     stopbits = 1
     parity = "N"
@@ -72,10 +72,5 @@ if __name__ == "__main__":
     ser = SerialCommunicator(port, baudrate, bytesize, stopbits, parity)
     ser.open_serial()
     if ser:
-        ser.send_data("0")
-        # time.sleep(5)
+        ser.send_data("#000P2000T0025!")
         print("end")
-        # ser.send_data("*80")
-        # time.sleep(5)
-        # ser.send_data("*90")
-        # time.sleep(5)

@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
-  <component name="PublishConfigData" autoUpload="Always" serverName="rk2588-199" remoteFilesAllowedToDisappearOnAutoupload="false" confirmBeforeUploading="false">
+  <component name="PublishConfigData" autoUpload="Always" serverName="rk3588-1.37" remoteFilesAllowedToDisappearOnAutoupload="false" confirmBeforeUploading="false">
     <option name="confirmBeforeUploading" value="false" />
     <serverData>
-      <paths name="rk2588-199">
+      <paths name="rk3588-1.37">
         <serverdata>
           <mappings>
             <mapping deploy="/root/yhj_demo/rknn_demo" local="$PROJECT_DIR$" web="/" />

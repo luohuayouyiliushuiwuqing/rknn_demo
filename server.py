@@ -128,7 +128,11 @@ while True:
 
             frame = pickle.loads(frame_data)
             frame = cv2.imdecode(frame, cv2.IMREAD_COLOR)
-            frame = cv2.resize(frame, (1280, 960))
+            center_x, center_y = 320, 240
+            cv2.circle(frame, (center_x, center_y), 1, (0, 0, 255), 4)
+            cv2.line(frame, (center_x - 320, center_y), (center_x + 320, center_y), (0, 255, 0), 1)
+            cv2.line(frame, (center_x, center_y - 240), (center_x, center_y + 240), (0, 255, 0), 1)
+            frame = cv2.resize(frame, (960, 720))
             cv2.imshow("video", frame)
             if cv2.waitKey(1) & 0xFF == ord("q"):
                 break
