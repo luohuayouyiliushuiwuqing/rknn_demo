@@ -8,7 +8,7 @@
 import cv2
 
 # 摄像头设备路径
-camera_device = "/dev/video11"
+camera_device = "/dev/video0"
 
 # # 定义视频捕获设备（0 表示默认摄像头）
 cap = cv2.VideoCapture(camera_device)
